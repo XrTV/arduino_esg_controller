@@ -3,7 +3,7 @@
 #include <LiquidCrystal_I2C.h>
 
 #define DEBUG   1   
-#define USE_LCD 0  
+#define USE_LCD 1
 
 const int fanPin = 9;         
 const int thermistorPin = A0;  
