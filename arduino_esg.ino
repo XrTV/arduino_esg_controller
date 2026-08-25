@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <avr/wdt.h> // Аппаратный ватчдог от зависаний
 
-#define DEBUG 1   
+#define DEBUG      1   
+#define USE_BUZZER 1 // 1 - включить зуммер, 0 - полностью отключить
 
 const int fanPin = 9;         
 const int thermistorPin = A0;  
@@ -53,13 +54,16 @@ void setup() {
 
 #if DEBUG
   Serial.begin(115200);
-  Serial.println(F("--- ZAPUSKATR ESG (NO LCD) ---"));
+  Serial.println(F("--- ESG/Temic Controller by xrbullet v2.1 ---"));
 #endif
 
   pinMode(fanPin, OUTPUT);
+  
+#if USE_BUZZER
   pinMode(buzzerPin, OUTPUT);
   digitalWrite(buzzerPin, LOW);
-  
+#endif
+
   unsigned long highTimeMicros = (unsigned long)(PERIOD_MICROS * (1.0 - (10.0 / 100.0)));
   pwmStartTime = micros();
   while (micros() - pwmStartTime < highTimeMicros) { 
@@ -71,11 +75,13 @@ void setup() {
   
   pinMode(buttonPin, INPUT_PULLUP);
 
+#if USE_BUZZER
   // Звуковой сигнал старта
   digitalWrite(buzzerPin, HIGH); delay(60); 
   digitalWrite(buzzerPin, LOW);  delay(40); 
   digitalWrite(buzzerPin, HIGH); delay(160); 
   digitalWrite(buzzerPin, LOW);
+#endif
 }
 
 void loop() {
@@ -258,6 +264,9 @@ void loop() {
 }
 
 void handleBuzzer() {
+#if !USE_BUZZER
+  return;
+#else
   if (mode != 0) {
     digitalWrite(buzzerPin, LOW);
     buzzerStep = 0;
@@ -299,6 +308,7 @@ void handleBuzzer() {
     digitalWrite(buzzerPin, LOW);
     buzzerStep = 0;
   }
+#endif
 }
 
 int getTemperatureNTC() {
