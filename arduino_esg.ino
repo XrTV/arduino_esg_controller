@@ -1,9 +1,7 @@
 #include <Arduino.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <avr/wdt.h> // Аппаратный ватчдог от зависаний
 
-#define DEBUG   1   
-#define USE_LCD 1
+#define DEBUG 1   
 
 const int fanPin = 9;         
 const int thermistorPin = A0;  
@@ -17,10 +15,6 @@ const float TEMPERATURE_NOMINAL = 20.0;
 const float B_COEFFICIENT = 3950.0;         
 
 const unsigned long PERIOD_MICROS = 100000; 
-
-#if USE_LCD
-LiquidCrystal_I2C lcd(0x27, 16, 2); 
-#endif
 
 bool fanIsActive = false; 
 bool overheatActive = false;      
@@ -52,25 +46,14 @@ unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50; 
 
 int getTemperatureNTC();
-void updateDisplay(int currentTemp, int rawAnalog, bool targetRelayState);
 void handleBuzzer();
 
 void setup() {
+  wdt_enable(WDTO_2S); // Включаем ватчдог на 2 сек (автоперезагрузка при зависании)
+
 #if DEBUG
   Serial.begin(115200);
-  Serial.println(F("--- ZAPUSKATR ESG ---"));
-#endif
-
-#if USE_LCD
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(F(" ZAPUSKATR ESG "));
-  lcd.setCursor(0, 1);
-  lcd.print(F(" LOCK TEMP -40C "));
-  delay(1500); 
-  lcd.clear();
+  Serial.println(F("--- ZAPUSKATR ESG (NO LCD) ---"));
 #endif
 
   pinMode(fanPin, OUTPUT);
@@ -79,19 +62,26 @@ void setup() {
   
   unsigned long highTimeMicros = (unsigned long)(PERIOD_MICROS * (1.0 - (10.0 / 100.0)));
   pwmStartTime = micros();
-  while (micros() - pwmStartTime < highTimeMicros) { digitalWrite(fanPin, HIGH); }
+  while (micros() - pwmStartTime < highTimeMicros) { 
+    digitalWrite(fanPin, HIGH); 
+  }
   
   digitalWrite(relayPin, HIGH); 
   pinMode(relayPin, OUTPUT);
   
   pinMode(buttonPin, INPUT_PULLUP);
+
+  // Звуковой сигнал старта
   digitalWrite(buzzerPin, HIGH); delay(60); 
   digitalWrite(buzzerPin, LOW);  delay(40); 
-  digitalWrite(buzzerPin, HIGH); delay(160); // РџР»РѕС‚РЅС‹Р№ РїРѕР±РµРґРЅС‹Р№ РїРёСЃРє
+  digitalWrite(buzzerPin, HIGH); delay(160); 
   digitalWrite(buzzerPin, LOW);
 }
 
 void loop() {
+  wdt_reset(); // Сбрасываем таймер ватчдога в каждом цикле
+
+  // Чтение команд из Serial
   if (Serial.available() > 0) {
     int input = Serial.parseInt(); 
     if (input >= 0 && input <= 100) {
@@ -103,6 +93,7 @@ void loop() {
     while(Serial.available() > 0) { Serial.read(); }
   }
 
+  // Обработка кнопки
   bool reading = digitalRead(buttonPin);
   if (reading != lastBtnState) {
     lastDebounceTime = millis();
@@ -132,6 +123,7 @@ void loop() {
   }
   lastBtnState = reading;
 
+  // Опрос датчика температуры
   bool targetRelayState = false; 
   int rawAnalog = analogRead(thermistorPin);
   int currentTemp = getTemperatureNTC(); 
@@ -144,6 +136,7 @@ void loop() {
 
   bool bypassFilter = false; 
 
+  // Выбор режима
   if (mode == 99) {
     targetDuty = manualDuty;
     targetRelayState = false;
@@ -163,6 +156,7 @@ void loop() {
     isSensorError = false;
   } 
   else {
+    // Авария датчика
     if (rawAnalog >= 1015 || rawAnalog <= 8 || forceOpenError) {
       targetDuty = 100;    
       targetRelayState = true; 
@@ -180,6 +174,7 @@ void loop() {
         targetDuty = 0;
       }
 
+      // Задержка защиты по перегреву (силовое реле)
       if (!overheatActive) {
         if (currentTemp >= 100) {
           if (relayTimer == 0) relayTimer = millis();
@@ -197,6 +192,7 @@ void loop() {
     }
   }
 
+  // Фильтрация плавности изменения оборотов
   if (bypassFilter) {
     stableTargetDuty = targetDuty; 
     dutyTimer = 0;
@@ -213,6 +209,7 @@ void loop() {
     }
   }
 
+  // Шаг изменения скважности (5%)
   if (currentDuty < stableTargetDuty) {
     currentDuty += 5;
     if (currentDuty > stableTargetDuty) currentDuty = stableTargetDuty;
@@ -221,6 +218,7 @@ void loop() {
     if (currentDuty < stableTargetDuty) currentDuty = stableTargetDuty;
   }
 
+  // Расчет инверсного программного PWM (10 Гц)
   float physicalDuty = 10.0 + ((float)currentDuty * 0.57);
   unsigned long highTimeMicros = (unsigned long)(PERIOD_MICROS * (1.0 - (physicalDuty / 100.0)));
   unsigned long currentMicros = micros();
@@ -235,28 +233,28 @@ void loop() {
     digitalWrite(fanPin, LOW);  
   }
 
+  // Управление силовым реле
   if (targetRelayState) digitalWrite(relayPin, LOW);  
   else digitalWrite(relayPin, HIGH);                 
 
   handleBuzzer();
 
+  // Логгирование в Serial каждые 500 мс
+#if DEBUG
   if (millis() - lastUpdateTime >= 500) { 
     lastUpdateTime = millis();
 
-    updateDisplay(currentTemp, rawAnalog, targetRelayState);
-
-#if DEBUG
-    Serial.print(F("ADC: "));      Serial.print(rawAnalog);
-    if (rawAnalog >= 1015 || forceOpenError) { Serial.print(F(" | Temp: РћР‘Р Р«Р’")); }
-    else if (rawAnalog <= 8) { Serial.print(F(" | Temp: РљР— Р”РђРўР§РРљРђ")); }
-    else { Serial.print(F(" | Temp: "));  Serial.print(currentTemp); Serial.print(F("C")); }
-    Serial.print(F(" | Overheat: ")); Serial.print(overheatActive ? F("Р”Рђ") : F("РќР•Рў"));
-    Serial.print(F(" | Mode: "));  Serial.print(mode);
-    Serial.print(F(" | Relay: ")); Serial.print(targetRelayState ? F("Р’РљР›") : F("Р’Р«РљР›"));
-    Serial.print(F(" | LogDUTY: "));  Serial.print(currentDuty); Serial.print(F("%"));
+    Serial.print(F("ADC: ")); Serial.print(rawAnalog);
+    if (rawAnalog >= 1015 || forceOpenError) { Serial.print(F(" | Temp: ОБРЫВ")); }
+    else if (rawAnalog <= 8) { Serial.print(F(" | Temp: КЗ ДАТЧИКА")); }
+    else { Serial.print(F(" | Temp: ")); Serial.print(currentTemp); Serial.print(F("C")); }
+    Serial.print(F(" | Overheat: ")); Serial.print(overheatActive ? F("ДА") : F("НЕТ"));
+    Serial.print(F(" | Mode: ")); Serial.print(mode);
+    Serial.print(F(" | Relay: ")); Serial.print(targetRelayState ? F("ВКЛ") : F("ВЫКЛ"));
+    Serial.print(F(" | LogDUTY: ")); Serial.print(currentDuty); Serial.print(F("%"));
     Serial.print(F(" | PhysDUTY: ")); Serial.print((int)physicalDuty); Serial.println(F("%"));
-#endif
   }
+#endif
 }
 
 void handleBuzzer() {
@@ -301,44 +299,6 @@ void handleBuzzer() {
     digitalWrite(buzzerPin, LOW);
     buzzerStep = 0;
   }
-}
-
-void updateDisplay(int currentTemp, int rawAnalog, bool targetRelayState) {
-#if USE_LCD
-  lcd.setCursor(0, 0);
-  lcd.print(F("T:"));
-  if (rawAnalog >= 1015 || forceOpenError) { lcd.print(F("ERR_OPEN        ")); } 
-  else if (rawAnalog <= 8) { lcd.print(F("ERR_SHRT        ")); } 
-  else {
-    if (currentTemp >= 0 && currentTemp < 100) lcd.print(F("0"));
-    lcd.print(currentTemp); 
-    lcd.print(F("C               ")); 
-  }
-
-  lcd.setCursor(0, 1);
-  lcd.print(F("A:"));
-  lcd.print(rawAnalog);
-  if (rawAnalog < 10) lcd.print(F("   "));
-  else if (rawAnalog < 100) lcd.print(F("  "));
-  else if (rawAnalog < 1000) lcd.print(F(" "));
-
-  lcd.setCursor(7, 1);
-  if (rawAnalog >= 1015 || rawAnalog <= 8 || forceOpenError) {
-    lcd.print(F("      ")); 
-  } else {
-    if (overheatActive) lcd.print(F("OVR!  ")); 
-    else {
-      lcd.print(F("M:"));
-      if (mode == 99) lcd.print(F("R "));
-      else { lcd.print(mode); lcd.print(F(" ")); }
-    }
-  }
-
-  lcd.setCursor(11, 1);
-  if (currentDuty < 10) lcd.print(F("0"));
-  lcd.print(currentDuty);
-  lcd.print(F("%"));
-#endif
 }
 
 int getTemperatureNTC() {
