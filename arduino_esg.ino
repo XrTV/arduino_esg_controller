@@ -22,7 +22,6 @@ const float SERIES_RESISTOR = 10000.0f;
 const float THERMISTOR_NOMINAL = 10000.0f;  
 const float TEMPERATURE_NOMINAL = 25.0f;    
 const float B_COEFFICIENT = 3950.0f;        
-
 const int TEMP_OFFSET = -2; 
 
 // --- PWM Period (10 Hz = 100,000 microseconds) ---
@@ -61,39 +60,31 @@ const unsigned long MULTI_CLICK_TIMEOUT = 350;
 // --- Turbo Buzzer Timer ---
 unsigned long lastTurboBeepTime = 0;
 
-// Указатель на функцию сброса по адресу 0 (безопасный reboot без bootloop WDT)
-void (*resetFunc) (void) = 0; 
-
 int getTemperatureNTC();
 bool getFilteredACState();
 void rebootController();
 void processNonBlockingSerial();
 
 void setup() {
-  wdt_disable(); // Отключаем WDT при старте
+  // 1. ПЕРВЫМ ДЕЛОМ отключаем Watchdog!
+  MCUSR = 0;
+  wdt_disable(); 
 
   pinMode(fanPin, OUTPUT);
   digitalWrite(fanPin, LOW);
 
   pinMode(acPin, INPUT); 
-  
   pinMode(relayPin, OUTPUT);
   digitalWrite(relayPin, LOW); 
   
-  // Включаем INPUT_PULLUP для защиты от наводок, если внешняя подтяжка подведёт
   pinMode(buttonPin, INPUT_PULLUP); 
-  
   pinMode(buzzerPin, OUTPUT);
   digitalWrite(buzzerPin, LOW);
-
-  if (USE_BUZZER) {
-    tone(buzzerPin, 2000, 100); // Одиночный неблокирующий сигнал
-  }
 
 #if DEBUG
   Serial.begin(115200);
   Serial.println(F("\n=========================================="));
-  Serial.println(F("       ESG/TEMIC CONTROLLER v2.3          "));
+  Serial.println(F("       ESG/TEMIC CONTROLLER v2.4          "));
   Serial.println(F("=========================================="));
   Serial.print(F("System Mode: "));
   if (IS_TEMIC_MODE) {
@@ -101,11 +92,17 @@ void setup() {
   } else {
     Serial.println(F("ESG (Min AC Duty: 30%, Relay: ON)"));
   }
-  Serial.println(F("Status: Watchdog (2s) Enabled. System Ready.\n"));
+  Serial.println(F("Status: System Ready.\n"));
 #endif
 
+  if (USE_BUZZER) {
+    tone(buzzerPin, 2000, 80);
+  }
+
   pwmStartTime = micros();
-  wdt_enable(WDTO_2S); // Включаем WDT в самом конце setup
+  
+  // Включаем Watchdog на 2 сек ТОЛЬКО в самом конце setup
+  wdt_enable(WDTO_2S); 
 }
 
 void loop() {
@@ -129,7 +126,7 @@ void loop() {
     if (btnPressTime > 0 && !isHoldHandled && holdDuration >= 40) { 
       if (mode != 0) {
         mode = 0; 
-        if (USE_BUZZER) tone(buzzerPin, 1200, 80); // Без блокирующих delay()
+        if (USE_BUZZER) tone(buzzerPin, 1200, 60); 
         clickCount = 0;
       } else {
         clickCount++;
@@ -147,7 +144,7 @@ void loop() {
     }
     else if (currentHold >= 3000 && currentHold < 5000 && !isHoldHandled) {
       mode = 2; // Turbo
-      if (USE_BUZZER) tone(buzzerPin, 2500, 200);
+      if (USE_BUZZER) tone(buzzerPin, 2500, 150);
       isHoldHandled = true;
       clickCount = 0;
     }
@@ -157,24 +154,25 @@ void loop() {
     if (mode == 0) { 
       if (clickCount == 1) {
         mode = 1; // Max
-        if (USE_BUZZER) tone(buzzerPin, 1800, 100);
+        if (USE_BUZZER) tone(buzzerPin, 1800, 80);
       }
       else if (clickCount >= 2) {
         mode = 2; // Turbo
-        if (USE_BUZZER) tone(buzzerPin, 2500, 200);
+        if (USE_BUZZER) tone(buzzerPin, 2500, 150);
       }
     }
     clickCount = 0;
   }
 
+  // Зуммер в режиме Turbo без забивания таймера
   if (mode == 2 && USE_BUZZER) {
-    if (millis() - lastTurboBeepTime >= 1000) {
+    if (millis() - lastTurboBeepTime >= 1500) {
       lastTurboBeepTime = millis();
-      tone(buzzerPin, 1000, 100); 
+      tone(buzzerPin, 1000, 50); 
     }
   }
 
-  // --- Main Logic Cycle ---
+  // --- Main Logic Cycle (150 ms) ---
   static unsigned long lastLogicCycle = 0;
   static int currentTemp = 0;
   static int rawAnalog = 0;
@@ -203,14 +201,14 @@ void loop() {
     }
     else if (mode == 2) { 
       targetPhysDuty = 90.0f;
-      targetRelayState = !IS_TEMIC_MODE; // Реле включается в Turbo только для ESG
+      targetRelayState = !IS_TEMIC_MODE; 
       bypassFilter = true;
       isSensorError = false;
     }
     else { // Mode 0: AUTO
       if (rawAnalog >= 1018 || rawAnalog <= 5 || currentTemp == -99) {
         targetPhysDuty = 90.0f; 
-        targetRelayState = !IS_TEMIC_MODE; // Авария датчика: реле включено только для ESG
+        targetRelayState = !IS_TEMIC_MODE; 
         bypassFilter = true; 
         isSensorError = true;
       } else {
@@ -229,13 +227,11 @@ void loop() {
           targetPhysDuty = 10.0f; 
         }
 
-        // Минимальная скважность по кондиционеру
         if (acActive) {
           float minAcDuty = IS_TEMIC_MODE ? 50.0f : 30.0f;
           if (targetPhysDuty < minAcDuty) targetPhysDuty = minAcDuty;
         }
 
-        // Гистерезис перегрева
         if (!overheatActive) {
           if (currentTemp >= 100) {
             if (relayTimer == 0) relayTimer = millis();
@@ -249,7 +245,6 @@ void loop() {
           } else { relayTimer = 0; }
         }
 
-        // Управление реле (только в режиме ESG)
         targetRelayState = !IS_TEMIC_MODE && (overheatActive || acActive);
         bypassFilter = false; 
       }
@@ -384,6 +379,9 @@ int getTemperatureNTC() {
   return result;
 }
 
+// Защищенный аппаратный перезапуск через WDT
 void rebootController() {
-  resetFunc(); // Вызов перехода по нулевому адресу
+  cli(); // Отключаем прерывания
+  wdt_enable(WDTO_15MS); // Настраиваем минимальный таймаут 15мс
+  while (1) {} // Ждем аппаратного сброса
 }
