@@ -14,7 +14,7 @@ const int fanPin = 9;         // 10 Hz PWM output
 const int thermistorPin = A0; // NTC sensor
 const int acPin = A2;         // AC signal input
 const int relayPin = 3;       // Auxiliary fan relay (Active only in ESG mode)
-const int buttonPin = A3;     // Кнопка на A3 (внешняя подтяжка 5V)
+const int buttonPin = A3;     // Кнопка на A3
 const int buzzerPin = 5;      // Buzzer pin
 
 // --- NTC Thermistor parameters ---
@@ -61,14 +61,16 @@ const unsigned long MULTI_CLICK_TIMEOUT = 350;
 // --- Turbo Buzzer Timer ---
 unsigned long lastTurboBeepTime = 0;
 
+// Указатель на функцию сброса по адресу 0 (безопасный reboot без bootloop WDT)
+void (*resetFunc) (void) = 0; 
+
 int getTemperatureNTC();
 bool getFilteredACState();
 void rebootController();
 void processNonBlockingSerial();
 
 void setup() {
-  MCUSR = 0; 
-  wdt_enable(WDTO_2S); 
+  wdt_disable(); // Отключаем WDT при старте
 
   pinMode(fanPin, OUTPUT);
   digitalWrite(fanPin, LOW);
@@ -78,21 +80,20 @@ void setup() {
   pinMode(relayPin, OUTPUT);
   digitalWrite(relayPin, LOW); 
   
-  pinMode(buttonPin, INPUT); 
+  // Включаем INPUT_PULLUP для защиты от наводок, если внешняя подтяжка подведёт
+  pinMode(buttonPin, INPUT_PULLUP); 
   
   pinMode(buzzerPin, OUTPUT);
   digitalWrite(buzzerPin, LOW);
 
   if (USE_BUZZER) {
-    tone(buzzerPin, 2000, 80);
-    delay(100);
-    tone(buzzerPin, 2500, 80);
+    tone(buzzerPin, 2000, 100); // Одиночный неблокирующий сигнал
   }
 
 #if DEBUG
   Serial.begin(115200);
   Serial.println(F("\n=========================================="));
-  Serial.println(F("       ESG/TEMIC CONTROLLER v2.2          "));
+  Serial.println(F("       ESG/TEMIC CONTROLLER v2.3          "));
   Serial.println(F("=========================================="));
   Serial.print(F("System Mode: "));
   if (IS_TEMIC_MODE) {
@@ -104,6 +105,7 @@ void setup() {
 #endif
 
   pwmStartTime = micros();
+  wdt_enable(WDTO_2S); // Включаем WDT в самом конце setup
 }
 
 void loop() {
@@ -127,7 +129,7 @@ void loop() {
     if (btnPressTime > 0 && !isHoldHandled && holdDuration >= 40) { 
       if (mode != 0) {
         mode = 0; 
-        if (USE_BUZZER) { tone(buzzerPin, 1500, 60); delay(80); tone(buzzerPin, 1200, 60); }
+        if (USE_BUZZER) tone(buzzerPin, 1200, 80); // Без блокирующих delay()
         clickCount = 0;
       } else {
         clickCount++;
@@ -295,7 +297,6 @@ void loop() {
     digitalWrite(fanPin, LOW);  
   }
 
-  // Выход реле включается только если targetRelayState == true (что невозможно в режиме TEMIC)
   digitalWrite(relayPin, targetRelayState ? HIGH : LOW);
 
   // --- Serial Debug ---
@@ -384,7 +385,5 @@ int getTemperatureNTC() {
 }
 
 void rebootController() {
-  cli();
-  wdt_enable(WDTO_15MS); 
-  while (true) {} 
+  resetFunc(); // Вызов перехода по нулевому адресу
 }
