@@ -1,4 +1,4 @@
-# ESG/TEMIC Fan Controller Firmware v2.2
+# ESG/TEMIC Fan Controller Firmware v2.4
 
 ## 🇷🇺 Русский
 
