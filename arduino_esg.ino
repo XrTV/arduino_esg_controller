@@ -67,7 +67,7 @@ void setup() {
 #if DEBUG
   Serial.begin(115200);
   Serial.println(F("\n=========================================="));
-  Serial.println(F("       ESG/TEMIC CONTROLLER v2.4          "));
+  Serial.println(F("       ESG/TEMIC CONTROLLER v2.5          "));
   Serial.println(F("=========================================="));
   Serial.print(F("System Mode: "));
   if (IS_TEMIC_MODE) {
