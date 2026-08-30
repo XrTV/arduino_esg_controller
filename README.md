@@ -1,4 +1,4 @@
-# ESG/TEMIC Fan Controller Firmware v2.5 — Документация и Схема
+# Обновленная документация и схема: ESG/TEMIC Fan Controller v2.5
 
 Управляющая прошивка и схема подключения для контроллеров вентиляторов охлаждения **TEMIC** и **ESG** на базе **Arduino Nano** (ATmega328P). Обеспечивает генерацию low-frequency PWM (10 Гц) с плавной рампой скважности, обработку сигналов NTC-термистора, климатической установки (AC), звуковую индикацию и управление реле (для ESG).
 
@@ -10,8 +10,7 @@
 * **Единый флаг конфигурации (`IS_TEMIC_MODE`):**
   * `true` (TEMIC): минимальный Duty для AC — 50%, силовое реле **отключено**.
   * `false` (ESG): минимальный Duty для AC — 30%, силовое реле **активно** (поддержка перегрева и AC).
-* **Антизависание и отказоустойчивость:** 
-  * Аппаратный **Watchdog (WDT 2 сек)** с защитой от зависаний при перезагрузках.
+* **Отказоустойчивость и интерфейс:** 
   * **Неблокирующий парсер Serial:** Взаимодействие через UART (115200 baud) без задержек.
   * **Безопасная работа с АЦП:** Фильтрация и защита от помех бортовой сети 12V.
 * **Звуковая индикация (Buzzer):** Информирование о старте системы, переключении режимов (Auto / Max / Turbo) и предупреждающие сигналы в режиме Turbo.
@@ -112,8 +111,7 @@ Control firmware and wiring diagram for **TEMIC** and **ESG** cooling fan module
 * **Unified Hardware Mode Flag (`IS_TEMIC_MODE`):**
   * `true` (TEMIC): minimum AC Duty — 50%, auxiliary relay **disabled**.
   * `false` (ESG): minimum AC Duty — 30%, auxiliary relay **enabled** (overheat & AC support).
-* **Anti-Freeze & Fault Tolerance:**
-  * Hardware **Watchdog Timer (2s WDT)** with reboot protection.
+* **Fault Tolerance & Interface:**
   * **Non-blocking Serial Parser:** Fully async UART processing at 115200 baud.
   * **ADC Protection:** Software filtering against 12V onboard noise.
 * **Audio Feedback (Buzzer):** Sound indications for system boot, mode switching (Auto / Max / Turbo), and Turbo warnings.
